@@ -1,0 +1,26 @@
+# STAC / data access (Planetary Computer primary, see agents.md)
+pystac-client
+planetary-computer
+
+# Geospatial I/O and processing
+rasterio
+rioxarray
+stackstac
+xarray
+geopandas
+shapely
+requests
+
+# Core
+numpy
+pandas
+scikit-image
+tqdm
+matplotlib
+joblib
+
+# Modeling (see agents.md — PyTorch, not the original TensorFlow/Keras)
+torch
+
+# Notebooks
+jupyterlab

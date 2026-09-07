@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+*.egg-info/
+
+# Data & models — see agents.md: never commit large imagery/weights.
+# Exception: data/boundaries/ holds small reference vector files (country boundaries), not imagery.
+data/**
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/boundaries/
+!data/boundaries/*.geojson
+models/**
+!models/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,30 @@
+name: s2_dsen2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  # STAC / data access (Planetary Computer primary, see agents.md)
+  - pystac-client
+  - planetary-computer
+  # Geospatial I/O and processing — via conda-forge, easier than pip on Windows (GDAL deps)
+  - rasterio
+  - rioxarray
+  - stackstac
+  - xarray
+  - geopandas
+  - shapely
+  - requests
+  # Core
+  - numpy
+  - pandas
+  - scikit-image
+  - tqdm
+  - matplotlib
+  - joblib
+  # Notebooks
+  - jupyterlab
+  - ipykernel
+  - pip
+  - pip:
+      # PyTorch via pip — official wheels are the most reliably up to date
+      - torch
