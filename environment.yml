@@ -18,6 +18,7 @@ dependencies:
   - numpy
   - pandas
   - scikit-image
+  - scipy
   - tqdm
   - matplotlib
   - joblib
