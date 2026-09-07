@@ -150,7 +150,18 @@ def extract_patches_for_scene(
                 aoi_geom, ref, srcs["SCL"]
             )
 
-        candidates = windows[: max_patches * config.LANDCOVER_CANDIDATE_MULTIPLIER]
+        # Floored at MAX_PATCHES_PER_SCENE (not the runtime `max_patches`) so a deliberately
+        # small `max_patches` (e.g. a quick single-scene test) doesn't shrink the candidate
+        # pool below what a scene's actual validity pass rate needs — a scene that only
+        # yields enough valid windows after scanning a few hundred candidates for a real
+        # (30-patch) run would otherwise see its candidate pool cut to a handful and easily
+        # find nothing. Caught via exactly this: `max_patches=5` returning zero patches for a
+        # scene that reliably filled all 30 in the real run.
+        n_candidates = max(
+            max_patches * config.LANDCOVER_CANDIDATE_MULTIPLIER,
+            config.MAX_PATCHES_PER_SCENE * config.LANDCOVER_CANDIDATE_MULTIPLIER,
+        )
+        candidates = windows[:n_candidates]
 
         # Pass 1: validity-check candidates, bucket survivors by land-cover class.
         class_buckets: dict[int, list] = {}
