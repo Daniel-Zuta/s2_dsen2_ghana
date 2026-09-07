@@ -73,3 +73,10 @@ MAX_PATCH_NODATA_FRACTION = 0.05
 # by href (signed hrefs change every re-fetch). Bandwidth on a metered connection is a real
 # constraint here; without this, every notebook rerun re-downloads identical data from scratch.
 RASTER_CACHE_DIR = REPO_ROOT / "data" / "interim" / "raster_cache"
+
+# Land-cover-stratified patch sampling (see s2sr.patches, s2sr.landcover). Stratification needs
+# to see a pool of candidates before picking winners, so it can't short-circuit early the way
+# pure-random sampling could — this bounds that pool to `MAX_PATCHES_PER_SCENE *
+# LANDCOVER_CANDIDATE_MULTIPLIER` candidate windows per scene, trading some stratification
+# quality for a predictable worst-case cost per scene.
+LANDCOVER_CANDIDATE_MULTIPLIER = 8

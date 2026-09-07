@@ -1,5 +1,5 @@
 """Patch extraction: spatial sampling of aligned 10m/20m band patches with per-patch AOI + SCL
-validity filtering.
+validity filtering, stratified by ESA WorldCover land-cover class.
 
 Deliberately NOT doing Wald's-protocol downsampling here — patches are saved at native
 resolution (`hr_10m`, `hr_20m`), and the (input, target) training pairs get constructed later
@@ -14,9 +14,10 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 import rasterio.features
+import rasterio.warp
 import rasterio.windows
 
-from . import config
+from . import config, landcover
 from .quality import SCL_NODATA_CLASSES, SCL_UNUSABLE_CLASSES
 from .stac import refresh_item
 
@@ -53,6 +54,35 @@ def _load_patch_record(item, out_path: Path) -> dict:
     }
 
 
+def _fetch_landcover_for_aoi(aoi_geom, ref, scl_src):
+    """Fetches a WorldCover grid covering just `aoi_geom`'s bounding box, at the same
+    20m-equivalent resolution/grid as the SCL validity checks below — so a candidate
+    window's already-computed `scl_window` can be used directly to slice it.
+
+    Returns `(grid, row0_20m, col0_20m)`, or `(None, None, None)` if the fetch fails (the
+    caller falls back to unstratified sampling rather than failing the whole scene over a
+    land-cover lookup — see agents.md, this fetch is unverified against the live API and may
+    need fixing).
+    """
+    try:
+        aoi_win = rasterio.windows.from_bounds(*aoi_geom.bounds, transform=ref.transform)
+        row0 = max(0, int(aoi_win.row_off))
+        col0 = max(0, int(aoi_win.col_off))
+        row1 = min(ref.height, int(aoi_win.row_off + aoi_win.height))
+        col1 = min(ref.width, int(aoi_win.col_off + aoi_win.width))
+        row0_20m, col0_20m = row0 // 2, col0 // 2
+        shape_20m = (max(1, (row1 - row0) // 2), max(1, (col1 - col0) // 2))
+        lc_transform = rasterio.windows.transform(
+            rasterio.windows.Window(col0_20m, row0_20m, shape_20m[1], shape_20m[0]),
+            scl_src.transform,
+        )
+        bounds_4326 = rasterio.warp.transform_bounds(ref.crs, "EPSG:4326", *aoi_geom.bounds)
+        grid = landcover.fetch_landcover_grid(bounds_4326, scl_src.crs, lc_transform, shape_20m)
+        return grid, row0_20m, col0_20m
+    except Exception:
+        return None, None, None
+
+
 def extract_patches_for_scene(
     item,
     aoi: gpd.GeoDataFrame,
@@ -63,13 +93,24 @@ def extract_patches_for_scene(
     max_nodata_fraction: float = config.MAX_PATCH_NODATA_FRACTION,
     max_patches: int = config.MAX_PATCHES_PER_SCENE,
     seed: int = 0,
+    use_landcover_stratification: bool = True,
 ):
-    """Extract up to `max_patches` valid patches from one scene.
+    """Extract up to `max_patches` valid patches from one scene, stratified across land-cover
+    classes (round-robin) rather than purely at random, so the kept subset isn't dominated by
+    whichever land cover happens to be spatially/numerically dominant in this scene.
 
     Each patch is saved as a compressed `.npz` with `hr_10m` (4 x P x P, native 10m bands),
     `hr_20m` (6 x P/2 x P/2, native 20m bands) — no downsampling applied — plus its validity
-    stats. Candidate patch windows are shuffled before filtering, so the kept subset is a random
-    sample of the AOI, not just whatever comes first in raster order.
+    stats.
+
+    Three passes: (1) validity-check up to `MAX_PATCHES_PER_SCENE *
+    LANDCOVER_CANDIDATE_MULTIPLIER` shuffled candidate windows and bucket the survivors by
+    majority land-cover class (one WorldCover fetch per scene, via `s2sr.landcover` — falls
+    back to unstratified sampling if that fetch fails); (2) round-robin across class buckets to
+    pick the actual kept subset; (3) only now do the expensive full-resolution band reads, for
+    the winners. This means a from-scratch scene does more (cheap, small) SCL-window reads than
+    a purely-random selection would (which could stop as soon as it found enough winners) — the
+    `LANDCOVER_CANDIDATE_MULTIPLIER` cap bounds how much more.
 
     Resumable and bandwidth-conscious (a real constraint — home connection is a mobile hotspot):
     a patch already saved from a previous run is reused from disk, never re-read over the
@@ -94,6 +135,7 @@ def extract_patches_for_scene(
 
     records = [_load_patch_record(item, p) for p in existing]
     existing_ids = {p.stem for p in existing}
+    n_needed = max_patches - len(records)
 
     with contextlib.ExitStack() as stack:
         srcs = {b: stack.enter_context(rasterio.open(href)) for b, href in band_hrefs.items()}
@@ -102,10 +144,17 @@ def extract_patches_for_scene(
         windows = list(patch_windows(ref.width, ref.height, ref.transform, aoi_geom, patch_size_10m))
         rng.shuffle(windows)
 
-        for window in windows:
-            if len(records) >= max_patches:
-                break
+        landcover_grid = landcover_row0 = landcover_col0 = None
+        if use_landcover_stratification:
+            landcover_grid, landcover_row0, landcover_col0 = _fetch_landcover_for_aoi(
+                aoi_geom, ref, srcs["SCL"]
+            )
 
+        candidates = windows[: max_patches * config.LANDCOVER_CANDIDATE_MULTIPLIER]
+
+        # Pass 1: validity-check candidates, bucket survivors by land-cover class.
+        class_buckets: dict[int, list] = {}
+        for window in candidates:
             patch_id = f"{item.id}__r{window.row_off}_c{window.col_off}"
             if patch_id in existing_ids:
                 continue
@@ -134,6 +183,33 @@ def extract_patches_for_scene(
             if unusable_fraction > max_unusable_fraction:
                 continue
 
+            land_class = 0
+            if landcover_grid is not None:
+                lc_row = scl_window.row_off - landcover_row0
+                lc_col = scl_window.col_off - landcover_col0
+                lc_patch = landcover_grid[lc_row : lc_row + scl_window.height, lc_col : lc_col + scl_window.width]
+                if lc_patch.size:
+                    land_class = int(np.bincount(lc_patch.ravel()).argmax())
+
+            class_buckets.setdefault(land_class, []).append(
+                (window, scl_window, aoi_coverage, nodata_fraction, unusable_fraction)
+            )
+
+        # Pass 2: round-robin across classes so the kept subset is diversified.
+        class_keys = list(class_buckets.keys())
+        rng.shuffle(class_keys)
+        selected = []
+        while len(selected) < n_needed and any(class_buckets.values()):
+            for cls in class_keys:
+                if len(selected) >= n_needed:
+                    break
+                bucket = class_buckets.get(cls)
+                if bucket:
+                    selected.append(bucket.pop())
+
+        # Pass 3: expensive full-resolution reads, only for the selected windows.
+        for window, scl_window, aoi_coverage, nodata_fraction, unusable_fraction in selected:
+            patch_id = f"{item.id}__r{window.row_off}_c{window.col_off}"
             hr_10m = np.stack([srcs[b].read(1, window=window) for b in config.BANDS_10M]).astype("float32")
             hr_20m = np.stack([srcs[b].read(1, window=scl_window) for b in config.BANDS_20M]).astype("float32")
 
