@@ -21,7 +21,7 @@ from .quality import SCL_NODATA_CLASSES, SCL_UNUSABLE_CLASSES
 from .stac import refresh_item
 
 
-def _patch_windows(width, height, transform, aoi_geom, patch_size):
+def patch_windows(width, height, transform, aoi_geom, patch_size):
     """Yield non-overlapping patch_size x patch_size Windows covering aoi_geom's bounding box,
     snapped to the patch grid and clipped to the raster's extent.
     """
@@ -99,7 +99,7 @@ def extract_patches_for_scene(
         srcs = {b: stack.enter_context(rasterio.open(href)) for b, href in band_hrefs.items()}
         ref = srcs["B04"]
         aoi_geom = aoi.to_crs(ref.crs).union_all()
-        windows = list(_patch_windows(ref.width, ref.height, ref.transform, aoi_geom, patch_size_10m))
+        windows = list(patch_windows(ref.width, ref.height, ref.transform, aoi_geom, patch_size_10m))
         rng.shuffle(windows)
 
         for window in windows:

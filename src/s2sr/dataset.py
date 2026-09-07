@@ -30,7 +30,7 @@ def _degrade(bands: np.ndarray, factor: int) -> np.ndarray:
     return blurred[:, ::factor, ::factor]
 
 
-def _upsample_bicubic(bands: np.ndarray, out_size: int) -> np.ndarray:
+def upsample_bicubic(bands: np.ndarray, out_size: int) -> np.ndarray:
     """Upsample a (C, H, W) array so each spatial dimension equals `out_size`, via
     cubic-spline interpolation (scipy's `order=3` — the standard bicubic stand-in).
     """
@@ -74,7 +74,7 @@ class WaldPairDataset(Dataset):
 
         guide = _degrade(hr_10m, self.downsample_factor)
         degraded_20m = _degrade(hr_20m, self.downsample_factor)
-        upsampled = _upsample_bicubic(degraded_20m, out_size=hr_20m.shape[-1])
+        upsampled = upsample_bicubic(degraded_20m, out_size=hr_20m.shape[-1])
 
         return (
             torch.from_numpy(guide.astype("float32")),
