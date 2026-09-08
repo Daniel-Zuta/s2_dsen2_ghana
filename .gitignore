@@ -18,6 +18,9 @@ data/**
 models/**
 !models/.gitkeep
 
+# SEN2SR comparison — downloaded pretrained weights, not our own code/data.
+experiments/sen2sr_comparison/model/**
+
 # OS
 .DS_Store
 Thumbs.db
