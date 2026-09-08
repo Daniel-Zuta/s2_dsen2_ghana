@@ -34,8 +34,11 @@ def superresolve_scene(
     patch_size: int = config.PATCH_SIZE_10M,
 ) -> Path:
     """Runs `model` over every `patch_size` x `patch_size` (10m) tile intersecting `aoi`
-    within `item`, and writes the super-resolved 20m bands — at native 10m resolution — to
-    `out_path` as one correctly-georeferenced multi-band GeoTIFF.
+    within `item`, and writes a complete 10-band product to `out_path` as one
+    correctly-georeferenced GeoTIFF, all at native 10m resolution: the 4 native 10m bands
+    (`config.BANDS_10M`, passed through unchanged — they're already full resolution, the model
+    never touches them) followed by the 6 super-resolved 20m bands (`config.BANDS_20M`). Band
+    order in the file is `BANDS_10M + BANDS_20M`; `dst.descriptions` names each one.
 
     Tiling matches `patches.patch_windows` (non-overlapping, snapped to the patch grid), so
     tiles partially outside the raster's extent are simply not covered — same known edge
@@ -53,13 +56,18 @@ def superresolve_scene(
         windows = list(patch_windows(ref.width, ref.height, ref.transform, aoi_geom, patch_size))
 
         profile = ref.profile.copy()
-        profile.update(count=len(config.BANDS_20M), dtype="float32", compress="deflate", nodata=None)
+        profile.update(
+            count=len(config.BANDS_10M) + len(config.BANDS_20M),
+            dtype="float32",
+            compress="deflate",
+            nodata=None,
+        )
 
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         with rasterio.open(out_path, "w", **profile) as dst:
-            dst.descriptions = tuple(config.BANDS_20M)
+            dst.descriptions = tuple(config.BANDS_10M) + tuple(config.BANDS_20M)
             for window in windows:
                 native_20m_window = rasterio.windows.Window(
                     window.col_off // downsample_factor,
@@ -78,7 +86,7 @@ def superresolve_scene(
                 with torch.no_grad():
                     pred = model(guide_t, upsampled_t)[0].cpu().numpy()
 
-                dst.write(pred, window=window)
+                dst.write(np.concatenate([guide, pred], axis=0), window=window)
 
     return out_path
 
