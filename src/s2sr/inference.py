@@ -61,6 +61,7 @@ def superresolve_scene(
             dtype="float32",
             compress="deflate",
             nodata=None,
+            BIGTIFF="YES",  # a 10-band float32 output can exceed plain TIFF's 4GB offset limit
         )
 
         out_path = Path(out_path)
@@ -101,7 +102,12 @@ def mosaic_geotiffs(paths, out_path) -> Path:
     try:
         mosaic, mosaic_transform = merge(srcs)
         profile = srcs[0].profile.copy()
-        profile.update(height=mosaic.shape[1], width=mosaic.shape[2], transform=mosaic_transform)
+        profile.update(
+            height=mosaic.shape[1],
+            width=mosaic.shape[2],
+            transform=mosaic_transform,
+            BIGTIFF="YES",  # a multi-tile, 10-band float32 mosaic can easily exceed plain TIFF's 4GB limit
+        )
 
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
