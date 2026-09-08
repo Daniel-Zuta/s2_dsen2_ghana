@@ -1,4 +1,5 @@
-"""Fetch and cache country boundary polygons from OpenStreetMap's Nominatim geocoder."""
+"""Fetch and cache named-place boundary polygons (countries, sub-national regions, ...) from
+OpenStreetMap's Nominatim geocoder."""
 
 from pathlib import Path
 
@@ -10,8 +11,14 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "s2_dsen2-research-script (contact: zutadaniel@gmail.com)"
 
 
-def fetch_country_boundary(name: str, out_path: Path) -> gpd.GeoDataFrame:
-    """Return a country's admin-0 boundary as a GeoDataFrame.
+def fetch_boundary(name: str, out_path: Path, feature_type: str = "country") -> gpd.GeoDataFrame:
+    """Return a named place's boundary as a GeoDataFrame, via OSM Nominatim.
+
+    `feature_type` narrows the search to Nominatim's feature classes — `"country"` (default,
+    admin-0), `"state"` (sub-national regions/provinces — Ghana's regions fall under this,
+    not a Ghana-specific "region" type), `"city"`, or `"settlement"`. Getting this wrong for a
+    sub-national query risks Nominatim matching an unrelated same-named place at the wrong
+    administrative level, or nothing at all.
 
     Cached to `out_path` on first call; later calls just read the cached file, so this only
     hits the network once per boundary.
@@ -26,7 +33,7 @@ def fetch_country_boundary(name: str, out_path: Path) -> gpd.GeoDataFrame:
             "q": name,
             "format": "geojson",
             "polygon_geojson": 1,
-            "featureType": "country",
+            "featureType": feature_type,
             "limit": 1,
         },
         headers={"User-Agent": USER_AGENT},

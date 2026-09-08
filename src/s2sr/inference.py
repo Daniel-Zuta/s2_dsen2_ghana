@@ -17,6 +17,7 @@ import numpy as np
 import rasterio
 import rasterio.windows
 import torch
+from rasterio.merge import merge
 
 from . import config
 from .dataset import upsample_bicubic
@@ -78,5 +79,29 @@ def superresolve_scene(
                     pred = model(guide_t, upsampled_t)[0].cpu().numpy()
 
                 dst.write(pred, window=window)
+
+    return out_path
+
+
+def mosaic_geotiffs(paths, out_path) -> Path:
+    """Merge multiple single-scene outputs from `superresolve_scene` into one GeoTIFF — for an
+    AOI that spans more than one Sentinel-2 tile/scene, which `superresolve_scene` itself
+    doesn't handle (it processes exactly one scene). Where two source tiles overlap,
+    `rasterio.merge`'s default (first non-nodata pixel wins, in `paths` order) applies.
+    """
+    srcs = [rasterio.open(p) for p in paths]
+    try:
+        mosaic, mosaic_transform = merge(srcs)
+        profile = srcs[0].profile.copy()
+        profile.update(height=mosaic.shape[1], width=mosaic.shape[2], transform=mosaic_transform)
+
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(out_path, "w", **profile) as dst:
+            dst.descriptions = srcs[0].descriptions
+            dst.write(mosaic)
+    finally:
+        for src in srcs:
+            src.close()
 
     return out_path
